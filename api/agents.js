@@ -1,43 +1,50 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const qs = require('qs');
+
 /**
  * @swagger
  * /agents:
- *   post:
+ *   get:
  *     summary: Fetch agents data from MahaRERA with filters and pagination
  *     description: This endpoint fetches agent data from the MahaRERA website based on the provided filters and pagination parameters.
- *     requestBody:
- *       required: true
- *       content:
- *         application/x-www-form-urlencoded:
- *           schema:
- *             type: object
- *             properties:
- *               page:
- *                 type: integer
- *                 description: Page number to fetch.
- *                 example: 1
- *               agent_name:
- *                 type: string
- *                 description: Name of the agent to filter.
- *                 example: John Doe
- *               agent_location:
- *                 type: string
- *                 description: Location of the agent to filter.
- *                 example: Mumbai
- *               agent_state:
- *                 type: integer
- *                 description: State code to filter agents.
- *                 example: 27
- *               agent_division:
- *                 type: integer
- *                 description: Division code to filter agents.
- *                 example: 1
- *               agent_district:
- *                 type: integer
- *                 description: District code to filter agents.
- *                 example: 2
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           description: Page number to fetch.
+ *           example: 1
+ *       - in: query
+ *         name: agent_name
+ *         schema:
+ *           type: string
+ *           description: Name of the agent to filter.
+ *           example: John Doe
+ *       - in: query
+ *         name: agent_location
+ *         schema:
+ *           type: string
+ *           description: Location of the agent to filter.
+ *           example: Mumbai
+ *       - in: query
+ *         name: agent_state
+ *         schema:
+ *           type: integer
+ *           description: State code to filter agents.
+ *           example: 27
+ *       - in: query
+ *         name: agent_division
+ *         schema:
+ *           type: integer
+ *           description: Division code to filter agents.
+ *           example: 1
+ *       - in: query
+ *         name: agent_district
+ *         schema:
+ *           type: integer
+ *           description: District code to filter agents.
+ *           example: 2
  *     responses:
  *       200:
  *         description: List of agents and pagination info
@@ -91,20 +98,16 @@ const qs = require('qs');
  */
 module.exports = async (req, res) => {
   try {
-    const body = req.body || (req.headers['content-type'] === 'application/x-www-form-urlencoded'
-        ? qs.parse(req.body)
-        : {});
-        const {
-            page = 1,
-            agent_name = '',
-            agent_location = '',
-            agent_state = '',
-            agent_division = '',
-            agent_district = ''
-          } = body;
+    // Extract query parameters
+    const {
+      page = 1,
+      agent_name = '',
+      agent_location = '',
+      agent_state = '',
+      agent_division = '',
+      agent_district = ''
+    } = req.query;
 
-       console.log('Request body:', body);  
-      
     const searchUrl = 'https://maharera.maharashtra.gov.in/agents-search-result';
     const getRes = await axios.get(`${searchUrl}?page=${page}`);
     const $get = cheerio.load(getRes.data);
