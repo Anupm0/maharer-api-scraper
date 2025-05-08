@@ -91,15 +91,18 @@ const qs = require('qs');
  */
 module.exports = async (req, res) => {
   try {
-    const {
-      page = 1,
-      agent_name = '',
-      agent_location = '',
-      agent_state = '',
-      agent_division = '',
-      agent_district = ''
-    } = req.body;
-
+    const body = req.body || (req.headers['content-type'] === 'application/x-www-form-urlencoded'
+        ? qs.parse(req.body)
+        : {});
+        const {
+            page = 1,
+            agent_name = '',
+            agent_location = '',
+            agent_state = '',
+            agent_division = '',
+            agent_district = ''
+          } = body;
+      
     const searchUrl = 'https://maharera.maharashtra.gov.in/agents-search-result';
     const getRes = await axios.get(`${searchUrl}?page=${page}`);
     const $get = cheerio.load(getRes.data);
