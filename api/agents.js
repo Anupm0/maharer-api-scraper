@@ -133,9 +133,9 @@ module.exports = async (req, res) => {
       const name = $(cols[1]).text().trim();
       const certificate_no = $(cols[2]).text().trim();
       const details_url = $(cols[3]).find('a').attr('href');
-      const application_action = $(cols[4]).find('a').attr('data-agentstr');
-      const certificate_action = $(cols[5]).find('a').attr('data-agentstr');
-      agents.push({ sr_no, name, certificate_no, details_url, application_action, certificate_action });
+      // const application_action = $(cols[4]).find('a').attr('data-agentstr');
+      // const certificate_action = $(cols[5]).find('a').attr('data-agentstr');
+      agents.push({ sr_no, name, certificate_no, details_url });
     });
 
     const pagesCountElem = $('.pagination .pagesCount');
