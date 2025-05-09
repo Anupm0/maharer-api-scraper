@@ -31,13 +31,12 @@ const router = express.Router();
  *         schema:
  *           type: string
  *         description: Name of the agent to filter.
- *         example: Anup
+ *         example: karan
  *       - in: query
  *         name: agent_project_name
  *         schema:
  *           type: string
  *         description: Project name of the agent to filter.
- *         example: Skyline Plaza
  *       - in: query
  *         name: agent_location
  *         schema:
