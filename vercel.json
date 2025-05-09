@@ -1,10 +1,15 @@
 {
-    "version": 2,
-    "routes": [
-      { "src": "/api/divisions", "dest": "/api/divisions.js" },
-      { "src": "/api/districts", "dest": "/api/districts.js" },
-      { "src": "/api/agents", "dest": "/api/agents.js" },
-      { "src": "/api/swagger.json", "dest": "/api/swagger.js" },
-      { "src": "/api/docs", "dest": "/api/docs.js" }
-    ]
-  }
+  "version": 2,
+  "builds": [
+    {
+      "src": "index.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "index.js"
+    }
+  ]
+}

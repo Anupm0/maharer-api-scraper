@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MahaRERA Agents Directory</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css">
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f8f9fa;
+      color: #333;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .header {
+      background-color: #0056b3;
+      color: white;
+      padding: 1.5rem 0;
+      margin-bottom: 2rem;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .search-card {
+      background-color: white;
+      border-radius: 10px;
+      box-shadow: 0 2px 15px rgba(0,0,0,0.1);
+      margin-bottom: 2rem;
+      padding: 1.5rem;
+      border-top: 4px solid #0056b3;
+    }
+    .results-card {
+      background-color: white;
+      border-radius: 10px;
+      box-shadow: 0 2px 15px rgba(0,0,0,0.1);
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    .table-responsive {
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th {
+      background-color: #f1f5f9;
+      color: #334155;
+      font-weight: 600;
+      text-align: left;
+      padding: 12px;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    td {
+      padding: 12px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    tr:hover {
+      background-color: #f8fafc;
+    }
+    .pagination {
+      justify-content: center;
+      margin-top: 1.5rem;
+    }
+    .btn-primary {
+      background-color: #0056b3;
+      border-color: #0056b3;
+    }
+    .btn-primary:hover {
+      background-color: #004494;
+      border-color: #004494;
+    }
+    .form-label {
+      font-weight: 500;
+      color: #444;
+    }
+    .form-control:focus {
+      border-color: #0056b3;
+      box-shadow: 0 0 0 0.25rem rgba(0, 86, 179, 0.25);
+    }
+    .no-results {
+      text-align: center;
+      padding: 3rem 0;
+      color: #6c757d;
+    }
+    .form-group {
+      margin-bottom: 1rem;
+    }
+    @media (max-width: 767px) {
+      .search-card, .results-card {
+        padding: 1rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="container">
+      <h1 class="text-center"><i class="fas fa-user-tie me-2"></i>MahaRERA Agents Directory</h1>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- Search Form -->
+    <div class="search-card">
+      <h2 class="mb-4"><i class="fas fa-search me-2"></i>Search Agents</h2>
+      <form action="/" method="GET" id="searchForm">
+        <div class="row">
+          <div class="col-md-4">
+            <div class="form-group">
+              <label for="agent_name" class="form-label">Agent Name</label>
+              <input type="text" class="form-control" id="agent_name" name="agent_name" 
+                     value="<%= searchParams.agent_name || '' %>" placeholder="Enter agent name">
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="form-group">
+              <label for="agent_project_name" class="form-label">Project Name</label>
+              <input type="text" class="form-control" id="agent_project_name" name="agent_project_name" 
+                     value="<%= searchParams.agent_project_name || '' %>" placeholder="Enter project name">
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="form-group">
+              <label for="agent_location" class="form-label">Location</label>
+              <input type="text" class="form-control" id="agent_location" name="agent_location" 
+                     value="<%= searchParams.agent_location || '' %>" placeholder="Enter location">
+            </div>
+          </div>
+        </div>
+
+        <div class="row mt-3">
+          <div class="col-md-4">
+            <div class="form-group">
+              <label for="agent_state" class="form-label">State</label>
+              <select class="form-select" id="agent_state" name="agent_state">
+                <option value="27" selected>Maharashtra</option>
+              </select>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="form-group">
+              <label for="agent_division" class="form-label">Division</label>
+              <select class="form-select" id="agent_division" name="agent_division">
+                <option value="">All Divisions</option>
+                <% divisions.forEach(division => { %>
+                  <option value="<%= division.value %>" 
+                    <%= searchParams.agent_division == division.value ? 'selected' : '' %>>
+                    <%= division.text %>
+                  </option>
+                <% }); %>
+              </select>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="form-group">
+              <label for="agent_district" class="form-label">District</label>
+              <select class="form-select" id="agent_district" name="agent_district">
+                <option value="">All Districts</option>
+                <% districts.forEach(district => { %>
+                  <option value="<%= district.value %>" 
+                    <%= searchParams.agent_district == district.value ? 'selected' : '' %>>
+                    <%= district.text %>
+                  </option>
+                <% }); %>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="row mt-4">
+          <div class="col">
+            <button type="submit" class="btn btn-primary">
+              <i class="fas fa-search me-2"></i>Search
+            </button>
+            <button type="reset" class="btn btn-outline-secondary ms-2" id="resetBtn">
+              <i class="fas fa-undo me-2"></i>Reset
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <!-- Results Table -->
+    <% if (hasSearchParams) { %>
+      <div class="results-card">
+        <h2 class="mb-4"><i class="fas fa-list me-2"></i>Search Results</h2>
+        
+        <% if (agents.length > 0) { %>
+          <div class="table-responsive">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>Sr. No</th>
+                  <th>Agent Name</th>
+                  <th>Certificate No</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% agents.forEach(agent => { %>
+                  <tr>
+                    <td><%= agent.sr_no %></td>
+                    <td><%= agent.name %></td>
+                    <td><%= agent.certificate_no %></td>
+                    <td>
+                      <% if (agent.details_url) { %>
+                        <a href="<%= agent.details_url %>" target="_blank" class="btn btn-sm btn-info">
+                          <i class="fas fa-info-circle"></i> Details
+                        </a>
+                      <% } %>
+                    </td>
+                  </tr>
+                <% }); %>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Pagination -->
+          <% if (pagination.total_pages > 1) { %>
+            <nav aria-label="Page navigation">
+              <ul class="pagination">
+                <% if (pagination.current_page > 1) { %>
+                  <li class="page-item">
+                    <a class="page-link" href="#" onclick="navigateToPage(<%= pagination.current_page - 1 %>)">Previous</a>
+                  </li>
+                <% } %>
+                
+                <% let startPage = Math.max(1, pagination.current_page - 2); %>
+                <% let endPage = Math.min(pagination.total_pages, startPage + 4); %>
+                <% if (endPage - startPage < 4 && startPage > 1) { %>
+                  <% startPage = Math.max(1, endPage - 4); %>
+                <% } %>
+                
+                <% for (let i = startPage; i <= endPage; i++) { %>
+                  <li class="page-item <%= i === pagination.current_page ? 'active' : '' %>">
+                    <a class="page-link" href="#" onclick="navigateToPage(<%= i %>)"><%= i %></a>
+                  </li>
+                <% } %>
+                
+                <% if (pagination.current_page < pagination.total_pages) { %>
+                  <li class="page-item">
+                    <a class="page-link" href="#" onclick="navigateToPage(<%= pagination.current_page + 1 %>)">Next</a>
+                  </li>
+                <% } %>
+              </ul>
+            </nav>
+          <% } %>
+        <% } else { %>
+          <div class="no-results">
+            <i class="fas fa-search fa-3x mb-3"></i>
+            <h3>No agents found</h3>
+            <p>Try adjusting your search criteria.</p>
+          </div>
+        <% } %>
+      </div>
+    <% } else { %>
+      <div class="results-card text-center py-5">
+        <i class="fas fa-search fa-3x mb-3 text-muted"></i>
+        <h3 class="text-muted">Enter search criteria to find agents</h3>
+        <p class="text-muted">Use the form above to search for MahaRERA registered agents.</p>
+      </div>
+    <% } %>
+  </div>
+
+  <footer class="py-4 bg-light mt-5">
+    <div class="container text-center">
+      <p class="mb-0">MahaRERA Agents Directory &copy; <%= new Date().getFullYear() %></p>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      // Handle division change to load districts
+      const divisionSelect = document.getElementById('agent_division');
+      const districtSelect = document.getElementById('agent_district');
+      
+      divisionSelect.addEventListener('change', async function() {
+        const divisionId = this.value;
+        districtSelect.innerHTML = '<option value="">All Districts</option>';
+        
+        if (divisionId) {
+          try {
+            const response = await fetch(`/api/districts?division_id=${divisionId}`);
+            const districts = await response.json();
+            
+            districts.forEach(district => {
+              const option = document.createElement('option');
+              option.value = district.value;
+              option.textContent = district.text;
+              districtSelect.appendChild(option);
+            });
+          } catch (error) {
+            console.error('Error loading districts:', error);
+          }
+        }
+      });
+      
+      // Handle reset button
+      document.getElementById('resetBtn').addEventListener('click', function() {
+        window.location.href = '/';
+      });
+    });
+    
+    // Handle pagination
+    function navigateToPage(page) {
+      const form = document.getElementById('searchForm');
+      const pageInput = document.createElement('input');
+      pageInput.type = 'hidden';
+      pageInput.name = 'page';
+      pageInput.value = page;
+      form.appendChild(pageInput);
+      form.submit();
+    }
+  </script>
+</body>
+</html>

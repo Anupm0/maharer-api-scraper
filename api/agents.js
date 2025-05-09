@@ -7,44 +7,53 @@ const qs = require('qs');
  * /agents:
  *   get:
  *     summary: Fetch agents data from MahaRERA with filters and pagination
- *     description: This endpoint fetches agent data from the MahaRERA website based on the provided filters and pagination parameters.
+ *     description: |
+ *       This endpoint retrieves agent data from the MahaRERA website based on provided
+ *       filters and pagination parameters. It constructs a GET request to the public search
+ *       result page and parses the HTML to extract agent listings and pagination info.
  *     parameters:
  *       - in: query
  *         name: page
  *         schema:
  *           type: integer
- *           description: Page number to fetch.
- *           example: 1
+ *         description: Page number to fetch (defaults to 1).
+ *         example: 2
  *       - in: query
  *         name: agent_name
  *         schema:
  *           type: string
- *           description: Name of the agent to filter.
- *           example: John Doe
+ *         description: Name of the agent to filter.
+ *         example: Anup
+ *       - in: query
+ *         name: agent_project_name
+ *         schema:
+ *           type: string
+ *         description: Project name of the agent to filter.
+ *         example: Skyline Plaza
  *       - in: query
  *         name: agent_location
  *         schema:
  *           type: string
- *           description: Location of the agent to filter.
- *           example: Mumbai
+ *         description: Location (city or area) to filter agents.
+ *         example: Pune
  *       - in: query
  *         name: agent_state
  *         schema:
  *           type: integer
- *           description: State code to filter agents.
- *           example: 27
+ *         description: State code to filter agents.
+ *         example: 27
  *       - in: query
  *         name: agent_division
  *         schema:
  *           type: integer
- *           description: Division code to filter agents.
- *           example: 1
+ *         description: Division code to filter agents.
+ *         example: 1
  *       - in: query
  *         name: agent_district
  *         schema:
  *           type: integer
- *           description: District code to filter agents.
- *           example: 2
+ *         description: District code to filter agents.
+ *         example: 2
  *     responses:
  *       200:
  *         description: List of agents and pagination info
@@ -69,7 +78,7 @@ const qs = require('qs');
  *                         description: Certificate number of the agent.
  *                       details_url:
  *                         type: string
- *                         description: URL for agent details.
+ *                         description: URL linking to agent details.
  *                       application_action:
  *                         type: string
  *                         description: Application action data.
@@ -84,9 +93,9 @@ const qs = require('qs');
  *                       description: Current page number.
  *                     total_pages:
  *                       type: integer
- *                       description: Total number of pages.
+ *                       description: Total number of pages available.
  *       500:
- *         description: Failed to fetch agents data
+ *         description: Failed to fetch agent data
  *         content:
  *           application/json:
  *             schema:
@@ -97,40 +106,36 @@ const qs = require('qs');
  *                   example: Failed to fetch agents data
  */
 module.exports = async (req, res) => {
+  const {
+    page = 1,
+    agent_name = '',
+    agent_project_name = '',
+    agent_location = '',
+    agent_state = '',
+    agent_division = '',
+    agent_district = ''
+  } = req.query;
+
+  const searchUrl = 'https://maharera.maharashtra.gov.in/agents-search-result';
+
   try {
-    // Extract query parameters
-    const {
-      page = 1,
-      agent_name = '',
-      agent_location = '',
-      agent_state = '',
-      agent_division = '',
-      agent_district = ''
-    } = req.query;
-
-    const searchUrl = 'https://maharera.maharashtra.gov.in/agents-search-result';
-    const getRes = await axios.get(`${searchUrl}?page=${page}`);
-    const $get = cheerio.load(getRes.data);
-    const formBuildId = $get('input[name="form_build_id"]').val();
-    const formId = $get('input[name="form_id"]').val();
-
-    const formData = qs.stringify({
+    // Build query parameters for GET request
+    const params = {
       agent_name,
+      agent_project_name,
       agent_location,
       agent_state,
       agent_division,
       agent_district,
       page,
-      form_build_id: formBuildId,
-      form_id: formId,
       op: 'Search'
-    });
+    };
 
-    const { data: html } = await axios.post(searchUrl, formData, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-    });
+    // Perform GET to fetch search results
+    const { data: html } = await axios.get(`${searchUrl}?${qs.stringify(params)}`);
     const $ = cheerio.load(html);
 
+    // Parse agent rows
     const agents = [];
     $('table.responsiveTable tbody tr').each((_, row) => {
       const cols = $(row).find('td');
@@ -143,15 +148,14 @@ module.exports = async (req, res) => {
       agents.push({ sr_no, name, certificate_no, details_url, application_action, certificate_action });
     });
 
-    const pagesCountElem = $('.pagination .pagesCount');
-    const total = parseInt(pagesCountElem.attr('data-total'), 10);
-    const perPage = agents.length;
-    const total_pages = Math.ceil(total / perPage);
+    // Calculate pagination
+    const total = parseInt($('.pagination .pagesCount').attr('data-total'), 10) || agents.length;
+    const total_pages = Math.ceil(total / (agents.length || 1));
     const current_page = parseInt(page, 10);
 
-    res.json({ agents, pagination: { current_page, total_pages } });
+    return res.json({ agents, pagination: { current_page, total_pages } });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to fetch agents data' });
+    console.error('Error fetching agents:', error.message);
+    return res.status(500).json({ error: 'Failed to fetch agents data' });
   }
 };
