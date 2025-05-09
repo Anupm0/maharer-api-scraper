@@ -17,7 +17,7 @@
       margin: 0 auto;
     }
     .header {
-      background-color: #0056b3;
+      background: linear-gradient(135deg, #0056b3 0%, #004494 100%);
       color: white;
       padding: 1.5rem 0;
       margin-bottom: 2rem;
@@ -30,6 +30,10 @@
       margin-bottom: 2rem;
       padding: 1.5rem;
       border-top: 4px solid #0056b3;
+      transition: all 0.3s ease;
+    }
+    .search-card:hover {
+      box-shadow: 0 5px 20px rgba(0,0,0,0.15);
     }
     .results-card {
       background-color: white;
@@ -37,9 +41,15 @@
       box-shadow: 0 2px 15px rgba(0,0,0,0.1);
       padding: 1.5rem;
       margin-bottom: 2rem;
+      transition: all 0.3s ease;
+    }
+    .results-card:hover {
+      box-shadow: 0 5px 20px rgba(0,0,0,0.15);
     }
     .table-responsive {
       overflow-x: auto;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.05);
     }
     table {
       width: 100%;
@@ -50,11 +60,11 @@
       color: #334155;
       font-weight: 600;
       text-align: left;
-      padding: 12px;
+      padding: 14px;
       border-bottom: 2px solid #e2e8f0;
     }
     td {
-      padding: 12px;
+      padding: 14px;
       border-bottom: 1px solid #e2e8f0;
     }
     tr:hover {
@@ -64,19 +74,39 @@
       justify-content: center;
       margin-top: 1.5rem;
     }
+    .page-item.active .page-link {
+      background-color: #0056b3;
+      border-color: #0056b3;
+    }
+    .page-link {
+      color: #0056b3;
+    }
     .btn-primary {
       background-color: #0056b3;
       border-color: #0056b3;
+      transition: all 0.3s ease;
     }
     .btn-primary:hover {
       background-color: #004494;
       border-color: #004494;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    .btn-info {
+      background-color: #17a2b8;
+      border-color: #17a2b8;
     }
     .form-label {
       font-weight: 500;
       color: #444;
     }
-    .form-control:focus {
+    .form-control, .form-select {
+      border-radius: 6px;
+      padding: 10px 12px;
+      border: 1px solid #ced4da;
+      transition: all 0.3s ease;
+    }
+    .form-control:focus, .form-select:focus {
       border-color: #0056b3;
       box-shadow: 0 0 0 0.25rem rgba(0, 86, 179, 0.25);
     }
@@ -92,6 +122,18 @@
       .search-card, .results-card {
         padding: 1rem;
       }
+      th, td {
+        padding: 10px;
+      }
+    }
+    .card-icon {
+      font-size: 24px;
+      color: #0056b3;
+      margin-right: 10px;
+    }
+    footer {
+      border-top: 1px solid #e2e8f0;
+      color: #6c757d;
     }
   </style>
 </head>
@@ -99,13 +141,14 @@
   <div class="header">
     <div class="container">
       <h1 class="text-center"><i class="fas fa-user-tie me-2"></i>MahaRERA Agents Directory</h1>
+      <p class="text-center text-light mb-0">Search for registered real estate agents across Maharashtra</p>
     </div>
   </div>
 
   <div class="container">
     <!-- Search Form -->
     <div class="search-card">
-      <h2 class="mb-4"><i class="fas fa-search me-2"></i>Search Agents</h2>
+      <h2 class="mb-4"><i class="fas fa-search me-2 card-icon"></i>Search Agents</h2>
       <form action="/" method="GET" id="searchForm">
         <div class="row">
           <div class="col-md-4">
@@ -115,16 +158,10 @@
                      value="<%= searchParams.agent_name || '' %>" placeholder="Enter agent name">
             </div>
           </div>
+      
           <div class="col-md-4">
             <div class="form-group">
-              <label for="agent_project_name" class="form-label">Project Name</label>
-              <input type="text" class="form-control" id="agent_project_name" name="agent_project_name" 
-                     value="<%= searchParams.agent_project_name || '' %>" placeholder="Enter project name">
-            </div>
-          </div>
-          <div class="col-md-4">
-            <div class="form-group">
-              <label for="agent_location" class="form-label">Location</label>
+              <label for="agent_location" class="form-label">PINCODE</label>
               <input type="text" class="form-control" id="agent_location" name="agent_location" 
                      value="<%= searchParams.agent_location || '' %>" placeholder="Enter location">
             </div>
@@ -135,9 +172,10 @@
           <div class="col-md-4">
             <div class="form-group">
               <label for="agent_state" class="form-label">State</label>
-              <select class="form-select" id="agent_state" name="agent_state">
+              <select class="form-select" id="agent_state" name="agent_state" disabled>
                 <option value="27" selected>Maharashtra</option>
               </select>
+              <input type="hidden" name="agent_state" value="27">
             </div>
           </div>
           <div class="col-md-4">
@@ -186,12 +224,12 @@
     <!-- Results Table -->
     <% if (hasSearchParams) { %>
       <div class="results-card">
-        <h2 class="mb-4"><i class="fas fa-list me-2"></i>Search Results</h2>
+        <h2 class="mb-4"><i class="fas fa-table-list me-2 card-icon"></i>Search Results</h2>
         
         <% if (agents.length > 0) { %>
           <div class="table-responsive">
             <table class="table table-hover">
-              <thead>
+              <thead class="table-light">
                 <tr>
                   <th>Sr. No</th>
                   <th>Agent Name</th>
@@ -207,8 +245,14 @@
                     <td><%= agent.certificate_no %></td>
                     <td>
                       <% if (agent.details_url) { %>
-                        <a href="<%= agent.details_url %>" target="_blank" class="btn btn-sm btn-info">
+                        <a href="<%= agent.details_url %>" target="_blank" class="btn btn-sm btn-info text-white">
                           <i class="fas fa-info-circle"></i> Details
+                        </a>
+                      <% } %>
+                      <% if (agent.certificate_action) { %>
+                        <a href="https://maharera.maharashtra.gov.in/downloadAgentCertificate?<%= agent.certificate_action %>" 
+                           target="_blank" class="btn btn-sm btn-success ms-1">
+                          <i class="fas fa-file-download"></i> Certificate
                         </a>
                       <% } %>
                     </td>
@@ -284,8 +328,17 @@
         
         if (divisionId) {
           try {
+            // Show loading indicator
+            districtSelect.disabled = true;
+            const option = document.createElement('option');
+            option.textContent = 'Loading...';
+            districtSelect.appendChild(option);
+            
             const response = await fetch(`/api/districts?division_id=${divisionId}`);
             const districts = await response.json();
+            
+            // Clear loading indicator
+            districtSelect.innerHTML = '<option value="">All Districts</option>';
             
             districts.forEach(district => {
               const option = document.createElement('option');
@@ -295,6 +348,9 @@
             });
           } catch (error) {
             console.error('Error loading districts:', error);
+            districtSelect.innerHTML = '<option value="">Error loading districts</option>';
+          } finally {
+            districtSelect.disabled = false;
           }
         }
       });

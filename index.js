@@ -12,7 +12,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static('public'));
 
-// Set EJS as templating engine
+
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
@@ -26,10 +26,12 @@ async function fetchAgentsData(params) {
       agent_name: params.agent_name || '',
       agent_project_name: params.agent_project_name || '',
       agent_location: params.agent_location || '',
-      agent_state: params.agent_state || '',
+      agent_state: params.agent_state || '27', // Default to Maharashtra
       agent_division: params.agent_division || '',
       agent_district: params.agent_district || '',
       page: params.page || 1,
+      form_build_id: 'form-67HJgC7FUdmF1oz4F_KgmFWNU_Iw9GXE0OeBJHtBXjQ',
+      form_id: 'agent_search_page_form',
       op: 'Search'
     };
 
@@ -62,30 +64,19 @@ async function fetchAgentsData(params) {
   }
 }
 
-// Helper function to fetch state/division/district data
+// Helper function to fetch division data
 async function fetchDivisionData() {
   try {
-    const url = 'https://maharera.maharashtra.gov.in/views/ajax';
-    const response = await axios.post(url, 
-      qs.stringify({
-        'field': 'field_project_state',
-        'value': '27',
-        'form_id': 'agent_search_form'
-      }), 
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        }
-      }
-    );
+    const url = 'https://maharera.maharashtra.gov.in/get-division-data?stateCode=27&langID=1&form_code=custom_search_form&field_code=agent_division';
+    const { data: html } = await axios.get(url);
     
     // Parse the response
     const divisions = [];
-    const $ = cheerio.load(response.data);
-    $('#edit-field-project-division option').each((_, element) => {
+    const $ = cheerio.load(html);
+    $('option').each((_, element) => {
       const value = $(element).val();
       const text = $(element).text();
-      if (value !== 'All') {
+      if (value !== '' && text !== 'Select Division') {
         divisions.push({ value, text });
       }
     });
@@ -101,27 +92,16 @@ async function fetchDistrictData(divisionId) {
   if (!divisionId) return [];
   
   try {
-    const url = 'https://maharera.maharashtra.gov.in/views/ajax';
-    const response = await axios.post(url, 
-      qs.stringify({
-        'field': 'field_project_division',
-        'value': divisionId,
-        'form_id': 'agent_search_form'
-      }), 
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        }
-      }
-    );
+    const url = `https://maharera.maharashtra.gov.in/div-district-data?state_code=27&lang_id=1&division_code=${divisionId}&district_form=custom_search_form&distruct_field=agent_district`;
+    const { data: html } = await axios.get(url);
     
     // Parse the response
     const districts = [];
-    const $ = cheerio.load(response.data);
-    $('#edit-field-project-district option').each((_, element) => {
+    const $ = cheerio.load(html);
+    $('option').each((_, element) => {
       const value = $(element).val();
       const text = $(element).text();
-      if (value !== 'All') {
+      if (value !== '' && text !== 'District') {
         districts.push({ value, text });
       }
     });
