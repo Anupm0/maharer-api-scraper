@@ -1,6 +1,9 @@
+const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const qs = require('qs');
+const { Parser } = require('json2csv');
+const router = express.Router();
 
 /**
  * @swagger
@@ -9,16 +12,20 @@ const qs = require('qs');
  *     summary: Fetch agents data from MahaRERA with filters and pagination
  *     description: |
  *       This endpoint retrieves agent data from the MahaRERA website based on provided
- *       filters and pagination parameters. It constructs a GET request to the public search
- *       result page and parses the HTML to extract agent listings, detail links, and
- *       certificate download links, along with pagination info.
+ *       filters and pagination parameters. It can fetch multiple pages in a single request.
  *     parameters:
  *       - in: query
  *         name: page
  *         schema:
  *           type: integer
- *         description: Page number to fetch (defaults to 1).
- *         example: 2
+ *         description: Starting page number to fetch (defaults to 1).
+ *         example: 1
+ *       - in: query
+ *         name: pages
+ *         schema:
+ *           type: integer
+ *         description: Number of pages to fetch (defaults to 1).
+ *         example: 3
  *       - in: query
  *         name: agent_name
  *         schema:
@@ -55,6 +62,13 @@ const qs = require('qs');
  *           type: integer
  *         description: District code to filter agents.
  *         example: 2
+ *       - in: query
+ *         name: format
+ *         schema:
+ *           type: string
+ *           enum: [json, csv]
+ *         description: Response format (defaults to json).
+ *         example: json
  *     responses:
  *       200:
  *         description: List of agents with detail and certificate URLs, plus pagination info
@@ -70,105 +84,198 @@ const qs = require('qs');
  *                     properties:
  *                       sr_no:
  *                         type: integer
- *                         description: Serial number of the agent record.
  *                       name:
  *                         type: string
- *                         description: Name of the agent.
  *                       certificate_no:
  *                         type: string
- *                         description: Certificate number of the agent.
  *                       details_url:
  *                         type: string
- *                         description: URL for full agent details page.
  *                       certificate_url:
  *                         type: string
- *                         description: Direct URL to download the agent's certificate PDF.
  *                 pagination:
  *                   type: object
  *                   properties:
- *                     current_page:
+ *                     start_page:
  *                       type: integer
- *                       description: Current page number.
+ *                     pages_fetched:
+ *                       type: integer
  *                     total_pages:
  *                       type: integer
- *                       description: Total number of pages available.
+ *                     total_records:
+ *                       type: integer
+ *           text/csv:
+ *             schema:
+ *               type: string
+ *               format: binary
  *       500:
  *         description: Failed to fetch agent data
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 error:
- *                   type: string
- *                   example: Failed to fetch agents data
  */
-module.exports = async (req, res) => {
-  const {
-    page = 1,
-    agent_name = '',
-    agent_project_name = '',
-    agent_location = '',
-    agent_state = '27',
-    agent_division = '',
-    agent_district = ''
-  } = req.query;
+router.get('/', async (req, res) => {
+  try {
+    const {
+      page = 1,
+      pages = 1,
+      agent_name = '',
+      agent_project_name = '',
+      agent_location = '',
+      agent_state = '27',
+      agent_division = '',
+      agent_district = '',
+      format = 'json'
+    } = req.query;
 
+    const startPage = parseInt(page, 10);
+    const pageCount = parseInt(pages, 10);
+    
+    if (pageCount <= 0 || startPage <= 0) {
+      return res.status(400).json({ error: 'Invalid page parameters' });
+    }
+
+    // Fetch multiple pages in parallel
+    const pagePromises = [];
+    const pagesToFetch = Math.min(pageCount, 10); // Limit to 10 pages to avoid abuse
+    
+    for (let i = 0; i < pagesToFetch; i++) {
+      pagePromises.push(fetchAgentsPage(startPage + i, {
+        agent_name,
+        agent_project_name,
+        agent_location,
+        agent_state,
+        agent_division,
+        agent_district
+      }));
+    }
+
+    const pageResults = await Promise.all(pagePromises);
+    
+    // Combine results from all pages
+    const agents = pageResults.flatMap(result => result.agents);
+    
+    // Get pagination info from the first result
+    const firstResult = pageResults[0];
+    const paginationInfo = {
+      start_page: startPage,
+      pages_fetched: pagesToFetch,
+      total_pages: firstResult.pagination.total_pages,
+      total_records: firstResult.pagination.total_records
+    };
+
+    // Return as JSON or CSV based on format parameter
+    if (format.toLowerCase() === 'csv') {
+      return sendAsCsv(res, agents);
+    } else {
+      return res.json({ agents, pagination: paginationInfo });
+    }
+  } catch (error) {
+    console.error('Error handling agent request:', error);
+    return res.status(500).json({ error: 'Failed to fetch agents data', message: error.message });
+  }
+});
+
+/**
+ * Fetch a single page of agents
+ * @param {number} pageNum - Page number to fetch
+ * @param {object} filters - Filter parameters
+ * @returns {Promise<{agents: Array, pagination: object}>}
+ */
+async function fetchAgentsPage(pageNum, filters) {
   const BASE_URL = 'https://maharera.maharashtra.gov.in';
   const SEARCH_PATH = '/agents-search-result';
 
-  try {
-    // Build query parameters
-    const queryParams = {
-      agent_name,
-      agent_project_name,
-      agent_location,
-      agent_state,
-      agent_division,
-      agent_district,
-      page,
-      op: 'Search'
-    };
+  // Build query parameters
+  const queryParams = {
+    agent_name: filters.agent_name || '',
+    agent_project_name: filters.agent_project_name || '',
+    agent_location: filters.agent_location || '',
+    agent_state: filters.agent_state || '27',
+    agent_division: filters.agent_division || '',
+    agent_district: filters.agent_district || '',
+    page: pageNum,
+    op: 'Search'
+  };
 
-    // Fetch search results page HTML
-    const response = await axios.get(
-      `${BASE_URL}${SEARCH_PATH}?${qs.stringify(queryParams)}`
-    );
-    const $ = cheerio.load(response.data);
+  // Fetch search results page HTML
+  const response = await axios.get(
+    `${BASE_URL}${SEARCH_PATH}?${qs.stringify(queryParams)}`
+  );
+  const $ = cheerio.load(response.data);
 
-    const agents = [];
-    $('table.responsiveTable tbody tr').each((_, row) => {
-      const cols = $(row).find('td');
-      const sr_no = parseInt($(cols[0]).text().trim(), 10);
-      const name = $(cols[1]).text().trim();
-      const certificate_no = $(cols[2]).text().trim();
+  const agents = [];
+  $('table.responsiveTable tbody tr').each((_, row) => {
+    const cols = $(row).find('td');
+    const sr_no = parseInt($(cols[0]).text().trim(), 10);
+    const name = $(cols[1]).text().trim();
+    const certificate_no = $(cols[2]).text().trim();
 
-      // Details page link
-      const detailsHref = $(cols[3]).find('a').attr('href') || '';
-      const details_url = detailsHref.startsWith('http')
-        ? detailsHref
-        : `${BASE_URL}${detailsHref}`;
+    // Details page link
+    const detailsHref = $(cols[3]).find('a').attr('href') || '';
+    const details_url = detailsHref.startsWith('http')
+      ? detailsHref
+      : `${BASE_URL}${detailsHref}`;
 
-      // Certificate download link
-      const certHref = $(cols[5]).find('a').attr('href') || '';
-      const certificate_url = certHref.startsWith('http')
-        ? certHref
-        : `${BASE_URL}${certHref}`;
+    // Certificate download link
+    const certHref = $(cols[5]).find('a').attr('href') || '';
+    const certificate_url = certHref.startsWith('http')
+      ? certHref
+      : `${BASE_URL}${certHref}`;
+    
+    // Certificate action
+    const certificate_action = $(cols[5]).find('a').attr('data-agentstr');
 
-      agents.push({ sr_no, name, certificate_no, details_url, certificate_url });
+    agents.push({ 
+      sr_no, 
+      name, 
+      certificate_no, 
+      details_url, 
+      certificate_url,
+      certificate_action
     });
+  });
 
-    // Pagination info
-    const totalRecords = parseInt(
-      $('.pagination .pagesCount').attr('data-total') || agents.length,
-      10
-    );
-    const total_pages = Math.ceil(totalRecords / (agents.length || totalRecords));
-    const current_page = parseInt(page, 10);
+  // Pagination info
+  const totalRecords = parseInt(
+    $('.pagination .pagesCount').attr('data-total') || agents.length,
+    10
+  );
+  const total_pages = Math.ceil(totalRecords / (agents.length || 1)) || 1;
+  const current_page = pageNum;
 
-    return res.json({ agents, pagination: { current_page, total_pages } });
+  return { 
+    agents, 
+    pagination: { 
+      current_page, 
+      total_pages,
+      total_records: totalRecords
+    } 
+  };
+}
+
+/**
+ * Send the response as a CSV file
+ * @param {object} res - Express response object
+ * @param {Array} agents - Agents data
+ */
+function sendAsCsv(res, agents) {
+  try {
+    const fields = [
+      { label: 'Sr No', value: 'sr_no' },
+      { label: 'Agent Name', value: 'name' },
+      { label: 'Certificate Number', value: 'certificate_no' },
+      { label: 'Details URL', value: 'details_url' },
+      { label: 'Certificate URL', value: 'certificate_url' }
+    ];
+
+    const json2csvParser = new Parser({ fields });
+    const csv = json2csvParser.parse(agents);
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=maharera_agents.csv');
+    
+    return res.send(csv);
   } catch (error) {
-    console.error('Error fetching agents:', error.stack);
-    return res.status(500).json({ error: 'Failed to fetch agents data' });
+    console.error('Error creating CSV:', error);
+    return res.status(500).json({ error: 'Failed to generate CSV' });
   }
-};
+}
+
+module.exports = router;
