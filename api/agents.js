@@ -1,8 +1,10 @@
 const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const qs = require('qs');
+const FormData = require('form-data');
 const { Parser } = require('json2csv');
+const tough = require('tough-cookie');
+const { wrapper } = require('axios-cookiejar-support');
 const router = express.Router();
 
 /**
@@ -19,55 +21,32 @@ const router = express.Router();
  *         schema:
  *           type: integer
  *         description: Starting page number to fetch (defaults to 1).
- *         example: 1
  *       - in: query
  *         name: pages
  *         schema:
  *           type: integer
- *         description: Number of pages to fetch (defaults to 1).
- *         example: 3
+ *         description: Number of pages to fetch (defaults to 1, max 10).
  *       - in: query
  *         name: agent_name
  *         schema:
  *           type: string
  *         description: Name of the agent to filter.
- *         example: karan
- *       - in: query
- *         name: agent_project_name
- *         schema:
- *           type: string
- *         description: Project name of the agent to filter.
  *       - in: query
  *         name: agent_location
  *         schema:
  *           type: string
  *         description: Location (city, area, or pincode) to filter agents.
- *         example: Pune
  *       - in: query
  *         name: agent_state
  *         schema:
  *           type: integer
  *         description: State code to filter agents (default 27 for Maharashtra).
- *         example: 27
- *       - in: query
- *         name: agent_division
- *         schema:
- *           type: integer
- *         description: Division code to filter agents.
- *         example: 1
- *       - in: query
- *         name: agent_district
- *         schema:
- *           type: integer
- *         description: District code to filter agents.
- *         example: 2
  *       - in: query
  *         name: format
  *         schema:
  *           type: string
  *           enum: [json, csv]
  *         description: Response format (defaults to json).
- *         example: json
  *     responses:
  *       200:
  *         description: List of agents with detail and certificate URLs, plus pagination info
@@ -109,172 +88,180 @@ const router = express.Router();
  *       500:
  *         description: Failed to fetch agent data
  */
+
+// Base constants
+const BASE_URL = 'https://maharera.maharashtra.gov.in';
+const SEARCH_PATH = '/agents-search-result';
+
+/**
+ * GET /agents
+ * Fetch filtered agent data (multiple pages) from MahaRERA
+ */
 router.get('/', async (req, res) => {
   try {
     const {
       page = 1,
       pages = 1,
       agent_name = '',
-      agent_project_name = '',
-      agent_location = '',
+      agent_location = '', // Changed from pin_code to agent_location
       agent_state = '27',
-      agent_division = '',
-      agent_district = '',
       format = 'json'
     } = req.query;
 
     const startPage = parseInt(page, 10);
-    const pageCount = parseInt(pages, 10);
-    
-    if (pageCount <= 0 || startPage <= 0) {
+    const pagesToFetch = Math.min(parseInt(pages, 10), 10);
+    if (startPage < 1 || pagesToFetch < 1) {
       return res.status(400).json({ error: 'Invalid page parameters' });
     }
 
-    // Fetch multiple pages in parallel
-    const pagePromises = [];
-    const pagesToFetch = Math.min(pageCount, 10); // Limit to 10 pages to avoid abuse
-    
-    for (let i = 0; i < pagesToFetch; i++) {
-      pagePromises.push(fetchAgentsPage(startPage + i, {
-        agent_name,
-        agent_project_name,
-        agent_location,
-        agent_state,
-        agent_division,
-        agent_district
-      }));
+    // Build an axios instance with cookie jar support
+    const jar = new tough.CookieJar();
+    const client = wrapper(axios.create({ 
+      baseURL: BASE_URL, 
+      jar, 
+      withCredentials: true,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+      }
+    }));
+
+    // First, GET the search page to grab form tokens and session cookie
+    const landingResp = await client.get(SEARCH_PATH);
+    const $landing = cheerio.load(landingResp.data);
+    const formBuildId = $landing('input[name="form_build_id"]').val();
+    const formToken = $landing('input[name="form_token"]').val();
+    const formId = $landing('input[name="form_id"]').val();
+
+    if (!formBuildId || !formId) {
+      throw new Error('Failed to retrieve form tokens');
     }
 
-    const pageResults = await Promise.all(pagePromises);
-    
-    // Combine results from all pages
-    const agents = pageResults.flatMap(result => result.agents);
-    
-    // Get pagination info from the first result
-    const firstResult = pageResults[0];
-    const paginationInfo = {
+    // Fetch requested pages in serial to avoid overloading the server
+    const results = [];
+    for (let i = 0; i < pagesToFetch; i++) {
+      try {
+        const pageResult = await fetchAgentsPage(client, startPage + i, {
+          agent_name,
+          agent_location,
+          agent_state,
+          form_build_id: formBuildId,
+          form_token: formToken,
+          form_id: formId
+        });
+        
+        results.push(pageResult);
+        
+        // Add a small delay between requests
+        if (i < pagesToFetch - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      } catch (err) {
+        console.error(`Failed to fetch page ${startPage + i}:`, err.message);
+        // Continue with other pages if one fails
+      }
+    }
+
+    // If all pages failed, throw an error
+    if (results.length === 0) {
+      throw new Error('Failed to fetch any pages');
+    }
+
+    const agents = results.flatMap(r => r.agents);
+    const pagination = {
       start_page: startPage,
-      pages_fetched: pagesToFetch,
-      total_pages: firstResult.pagination.total_pages,
-      total_records: firstResult.pagination.total_records
+      pages_fetched: results.length,
+      total_pages: results[0].pagination.total_pages,
+      total_records: results[0].pagination.total_records
     };
 
-    // Return as JSON or CSV based on format parameter
     if (format.toLowerCase() === 'csv') {
       return sendAsCsv(res, agents);
     } else {
-      return res.json({ agents, pagination: paginationInfo });
+      return res.json({ agents, pagination });
     }
-  } catch (error) {
-    console.error('Error handling agent request:', error);
-    return res.status(500).json({ error: 'Failed to fetch agents data', message: error.message });
+  } catch (err) {
+    console.error('Error in /agents:', err);
+    res.status(500).json({ error: 'Failed to fetch agents data', message: err.message });
   }
 });
 
 /**
- * Fetch a single page of agents
- * @param {number} pageNum - Page number to fetch
- * @param {object} filters - Filter parameters
- * @returns {Promise<{agents: Array, pagination: object}>}
+ * Fetch a single page of agents using POST with FormData
  */
-async function fetchAgentsPage(pageNum, filters) {
-  const BASE_URL = 'https://maharera.maharashtra.gov.in';
-  const SEARCH_PATH = '/agents-search-result';
+async function fetchAgentsPage(client, pageNum, tokens) {
+  // Create FormData instance
+  const formData = new FormData();
+  
+  // Append all required fields
+  formData.append('agent_name', tokens.agent_name || '');
+  formData.append('agent_location', tokens.agent_location || '');
+  formData.append('agent_state', tokens.agent_state || '27');
+  formData.append('page', pageNum);
+  formData.append('form_build_id', tokens.form_build_id);
+  formData.append('form_token', tokens.form_token || '');
+  formData.append('form_id', tokens.form_id);
+  formData.append('op', 'Search');
 
-  // Build query parameters
-  const queryParams = {
-    agent_name: filters.agent_name || '',
-    agent_project_name: filters.agent_project_name || '',
-    agent_location: filters.agent_location || '',
-    agent_state: filters.agent_state || '27',
-    agent_division: filters.agent_division || '',
-    agent_district: filters.agent_district || '',
-    page: pageNum,
-    op: 'Search'
-  };
-
-  // Fetch search results page HTML
-  const response = await axios.get(
-    `${BASE_URL}${SEARCH_PATH}?${qs.stringify(queryParams)}`
-  );
-  const $ = cheerio.load(response.data);
-
-  const agents = [];
-  $('table.responsiveTable tbody tr').each((_, row) => {
-    const cols = $(row).find('td');
-    const sr_no = parseInt($(cols[0]).text().trim(), 10);
-    const name = $(cols[1]).text().trim();
-    const certificate_no = $(cols[2]).text().trim();
-
-    // Details page link
-    const detailsHref = $(cols[3]).find('a').attr('href') || '';
-    const details_url = detailsHref.startsWith('http')
-      ? detailsHref
-      : `${BASE_URL}${detailsHref}`;
-
-    // Certificate download link
-    const certHref = $(cols[5]).find('a').attr('href') || '';
-    const certificate_url = certHref.startsWith('http')
-      ? certHref
-      : `${BASE_URL}${certHref}`;
-    
-    // Certificate action
-    const certificate_action = $(cols[5]).find('a').attr('data-agentstr');
-
-    agents.push({ 
-      sr_no, 
-      name, 
-      certificate_no, 
-      details_url, 
-      certificate_url,
-      certificate_action
-    });
+  // Get form headers
+  const formHeaders = formData.getHeaders();
+  
+  // Make POST request with FormData
+  const resp = await client.post(SEARCH_PATH, formData, {
+    headers: {
+      ...formHeaders,
+      'Origin': BASE_URL,
+      'Referer': `${BASE_URL}${SEARCH_PATH}`
+    }
   });
 
-  // Pagination info
-  const totalRecords = parseInt(
-    $('.pagination .pagesCount').attr('data-total') || agents.length,
-    10
-  );
-  const total_pages = Math.ceil(totalRecords / (agents.length || 1)) || 1;
-  const current_page = pageNum;
+  const $ = cheerio.load(resp.data);
+  const agents = [];
 
-  return { 
-    agents, 
-    pagination: { 
-      current_page, 
-      total_pages,
-      total_records: totalRecords
-    } 
+  $('table.responsiveTable tbody tr').each((_, row) => {
+    const cols = $(row).find('td');
+    if (cols.length >= 6) {
+      agents.push({
+        sr_no: parseInt($(cols[0]).text().trim(), 10),
+        name: $(cols[1]).text().trim(),
+        certificate_no: $(cols[2]).text().trim(),
+        details_url: makeAbsolute($(cols[3]).find('a').attr('href')),
+        certificate_url: makeAbsolute($(cols[5]).find('a').attr('href'))
+      });
+    }
+  });
+
+  const totalRecords = parseInt($('span.pagesCount').attr('data-total') || agents.length, 10);
+  const total_pages = Math.ceil(totalRecords / (agents.length || 1)) || 1;
+
+  return {
+    agents,
+    pagination: { current_page: pageNum, total_pages, total_records: totalRecords }
   };
 }
 
 /**
- * Send the response as a CSV file
- * @param {object} res - Express response object
- * @param {Array} agents - Agents data
+ * Convert hrefs to absolute URLs
+ */
+function makeAbsolute(href) {
+  if (!href) return '';
+  return href.startsWith('http') ? href : `${BASE_URL}${href}`;
+}
+
+/**
+ * Send JSON array as CSV download
  */
 function sendAsCsv(res, agents) {
-  try {
-    const fields = [
-      { label: 'Sr No', value: 'sr_no' },
-      { label: 'Agent Name', value: 'name' },
-      { label: 'Certificate Number', value: 'certificate_no' },
-      { label: 'Details URL', value: 'details_url' },
-      { label: 'Certificate URL', value: 'certificate_url' }
-    ];
-
-    const json2csvParser = new Parser({ fields });
-    const csv = json2csvParser.parse(agents);
-    
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename=maharera_agents.csv');
-    
-    return res.send(csv);
-  } catch (error) {
-    console.error('Error creating CSV:', error);
-    return res.status(500).json({ error: 'Failed to generate CSV' });
-  }
+  const fields = [
+    { label: 'Sr No', value: 'sr_no' },
+    { label: 'Agent Name', value: 'name' },
+    { label: 'Certificate Number', value: 'certificate_no' },
+    { label: 'Details URL', value: 'details_url' },
+    { label: 'Certificate URL', value: 'certificate_url' }
+  ];
+  const csv = new Parser({ fields }).parse(agents);
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=maharera_agents.csv');
+  res.send(csv);
 }
 
 module.exports = router;
