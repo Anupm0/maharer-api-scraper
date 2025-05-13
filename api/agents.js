@@ -103,7 +103,7 @@ router.get('/', async (req, res) => {
       page = 1,
       pages = 1,
       agent_name = '',
-      agent_location = '', // Changed from pin_code to agent_location
+      agent_location = '',
       agent_state = '27',
       format = 'json'
     } = req.query;
@@ -116,16 +116,16 @@ router.get('/', async (req, res) => {
 
     // Build an axios instance with cookie jar support
     const jar = new tough.CookieJar();
-    const client = wrapper(axios.create({ 
-      baseURL: BASE_URL, 
-      jar, 
+    const client = wrapper(axios.create({
+      baseURL: BASE_URL,
+      jar,
       withCredentials: true,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
       }
     }));
 
-    // First, GET the search page to grab form tokens and session cookie
+    // Get form tokens for POST body
     const landingResp = await client.get(SEARCH_PATH);
     const $landing = cheerio.load(landingResp.data);
     const formBuildId = $landing('input[name="form_build_id"]').val();
@@ -136,42 +136,61 @@ router.get('/', async (req, res) => {
       throw new Error('Failed to retrieve form tokens');
     }
 
-    // Fetch requested pages in serial to avoid overloading the server
-    const results = [];
+    // Collect unique agents using a Map (key: certificate_no)
+    const agentMap = new Map();
+    let total_pages = 0;
+    let total_records = 0;
+
     for (let i = 0; i < pagesToFetch; i++) {
-      try {
-        const pageResult = await fetchAgentsPage(client, startPage + i, {
-          agent_name,
-          agent_location,
-          agent_state,
-          form_build_id: formBuildId,
-          form_token: formToken,
-          form_id: formId
-        });
-        
-        results.push(pageResult);
-        
-        // Add a small delay between requests
-        if (i < pagesToFetch - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+      const pageNum = startPage + i - 1;
+      const pageUrl = `${SEARCH_PATH}?page=${pageNum}&op=Search`;
+
+      // Prepare FormData for filters
+      const formData = new FormData();
+      formData.append('agent_name', agent_name);
+      formData.append('agent_location', agent_location);
+      formData.append('agent_state', agent_state);
+      formData.append('form_build_id', formBuildId);
+      formData.append('form_token', formToken || '');
+      formData.append('form_id', formId);
+      formData.append('op', 'Search');
+
+      // POST with filters and pagination in URL
+      const resp = await client.post(pageUrl, formData, {
+        headers: {
+          ...formData.getHeaders(),
+          'Origin': BASE_URL,
+          'Referer': `${BASE_URL}${SEARCH_PATH}`
         }
-      } catch (err) {
-        console.error(`Failed to fetch page ${startPage + i}:`, err.message);
-        // Continue with other pages if one fails
+      });
+
+      const { agents, pagination } = parseAgentPage(resp.data, pageNum + 1);
+
+      // Add only unique agents by certificate_no
+      for (const agent of agents) {
+        if (!agentMap.has(agent.certificate_no)) {
+          agentMap.set(agent.certificate_no, agent);
+        }
+      }
+
+      // Set pagination info from first page
+      if (i === 0) {
+        total_pages = pagination.total_pages;
+        total_records = pagination.total_records;
+      }
+
+      // Delay to avoid rate limiting
+      if (i < pagesToFetch - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
 
-    // If all pages failed, throw an error
-    if (results.length === 0) {
-      throw new Error('Failed to fetch any pages');
-    }
-
-    const agents = results.flatMap(r => r.agents);
+    const agents = Array.from(agentMap.values());
     const pagination = {
       start_page: startPage,
-      pages_fetched: results.length,
-      total_pages: results[0].pagination.total_pages,
-      total_records: results[0].pagination.total_records
+      pages_fetched: pagesToFetch,
+      total_pages,
+      total_records
     };
 
     if (format.toLowerCase() === 'csv') {
@@ -186,37 +205,11 @@ router.get('/', async (req, res) => {
 });
 
 /**
- * Fetch a single page of agents using POST with FormData
+ * Parse HTML response and extract agent data
  */
-async function fetchAgentsPage(client, pageNum, tokens) {
-  // Create FormData instance
-  const formData = new FormData();
-  
-  // Append all required fields
-  formData.append('agent_name', tokens.agent_name || '');
-  formData.append('agent_location', tokens.agent_location || '');
-  formData.append('agent_state', tokens.agent_state || '27');
-  formData.append('page', pageNum);
-  formData.append('form_build_id', tokens.form_build_id);
-  formData.append('form_token', tokens.form_token || '');
-  formData.append('form_id', tokens.form_id);
-  formData.append('op', 'Search');
-
-  // Get form headers
-  const formHeaders = formData.getHeaders();
-  
-  // Make POST request with FormData
-  const resp = await client.post(SEARCH_PATH, formData, {
-    headers: {
-      ...formHeaders,
-      'Origin': BASE_URL,
-      'Referer': `${BASE_URL}${SEARCH_PATH}`
-    }
-  });
-
-  const $ = cheerio.load(resp.data);
+function parseAgentPage(html, pageNum) {
+  const $ = cheerio.load(html);
   const agents = [];
-
   $('table.responsiveTable tbody tr').each((_, row) => {
     const cols = $(row).find('td');
     if (cols.length >= 6) {
@@ -229,10 +222,8 @@ async function fetchAgentsPage(client, pageNum, tokens) {
       });
     }
   });
-
   const totalRecords = parseInt($('span.pagesCount').attr('data-total') || agents.length, 10);
   const total_pages = Math.ceil(totalRecords / (agents.length || 1)) || 1;
-
   return {
     agents,
     pagination: { current_page: pageNum, total_pages, total_records: totalRecords }
